@@ -7,213 +7,121 @@
 
 - name: create group
   group:
-    name: '{{ letsencrypt_group }}'
+    name: '{{ dehydrated_web_group }}'
     system: yes
 
 - name: create user
   user:
-    name: '{{ letsencrypt_user }}'
-    group: '{{ letsencrypt_group }}'
-    home: '{{ acme_tiny_data_directory }}'
+    name: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
+    create_home: no
+    password_lock: yes
     system: yes
 
 - name: create base directory
   file:
     path: '{{ dehydrated_base_directory }}'
     state: directory
-    owner: '{{ letsencrypt_user }}'
-    group: '{{ letsencrypt_group }}'
-
-- name: create certs directory
-  file:
-    path: '{{ dehydrated_certs_directory }}'
-    state: directory
-    mode: '{{ letsencrypt_certs_dir_permissions }}'
-    owner: '{{ letsencrypt_certs_dir_owner }}'
-    group: '{{ letsencrypt_certs_dir_group }}'
-
-#- name: create key directory
-#  file:
-#    path: '{{ letsencrypt_key_dir }}'
-#    state: directory
-#    mode: '{{ letsencrypt_key_dir_permissions }}'
-#    owner: '{{ letsencrypt_key_dir_owner }}'
-#    group: '{{ letsencrypt_key_dir_group }}'
-
-
-- name: remove acme-tiny program directory
-  file:
-    path: '{{ acme_tiny_software_directory }}'
-    state: absent
-
-- name: create program directory
-  file:
-    path: '{{ dehydrated_software_directory }}'
-    state: directory
-
-- name: create challenges directory
-  file:
-    path: '{{ dehydrated_challenges_directory }}'
-    state: directory
-    owner: '{{ letsencrypt_user }}'
-    group: '{{ letsencrypt_group }}'
-
-#- name: ensure correct permissions on data directory
-#  file:
-#    path: '{{ dehydrated_base_directory }}'
-#    state: directory
-#    mode: 0700
-#    owner: '{{ letsencrypt_user }}'
-#    group: '{{ letsencrypt_group }}'
-#    recurse: true
-
-- name: install pip dependencies
-  pip:
-    name: argparse
-    state: present
-
-- name: clone acme-tiny repository
-  git:
-    dest: '{{ dehydrated_software_directory }}'
-    repo: '{{ dehydrated_repo }}'
-    version: '{{ dehydrated_commit }}'
-    accept_hostkey: yes
+    mode: 0750
+    owner: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
 
 - name: write configuration file
   template:
     src: etc_dehydrated_config.j2
     dest: "{{ dehydrated_config_file }}"
+    owner: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
 
-# the account.key file will automatically be copied to the correct location by dehydrated if no key has been registered
-- name: copy Letsencrypt account key source file
-  copy:
-    src: "{{ letsencrypt_account_key_source_file }}"
-    dest: "{{ letsencrypt_account_key }}"
-  when: letsencrypt_account_key_source_file is defined
-
-- name: copy Letsencrypt account key source contents
-  copy:
-    content: "{{ letsencrypt_account_key_source_content|trim }}"
-    dest: "{{ letsencrypt_account_key }}"
-  when: letsencrypt_account_key_source_content is defined
-
-# TODO do registration with dehydrated
-#- name: generate a new account key
-#  shell: >
-#    openssl genrsa 4096 > {{ letsencrypt_account_key }}
-#  args:
-#    creates: "{{ letsencrypt_account_key }}"
-#  register: generate_account_key
-
-#- name: print account public key
-#  command: >
-#    openssl rsa -in {{ letsencrypt_account_key }} -pubout
-#  register: account_public_key
-#  when: generate_account_key | changed
-
-# todo is this still required?
-#- name: "Please register the account public key with Letsencrypt, using for example https://gethttpsforfree.com/"
-#  debug: var=account_public_key.stdout
-#  when: generate_account_key | changed
-
-
-# todo remove script instead if it exists
-- name: remove certificate renewal script
-  file:
-    path: "{{ acme_tiny_data_directory }}/renew-certs.py"
-    state: absent
+- name: write hook.sh file
+  template:
+    src: hook.sh.j2
+    dest: "{{ dehydrated_base_directory }}/hook.sh"
+    owner: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
+    mode: 0750
 
 - name: generate dehydrated domain list
   template:
     src: domains.txt.j2
     dest: "{{ dehydrated_domains_file }}"
-    mode: 0700
-    owner: '{{ letsencrypt_user }}'
-    group: '{{ letsencrypt_group }}'
+    mode: 0750
+    owner: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
 
-#- name: download intermediate certificate
-#  get_url: >
-#    url={{ letsencrypt_intermediate_cert_url }}
-#    dest={{ letsencrypt_intermediate_cert_path }}
-#    sha256sum={{ letsencrypt_intermediate_cert_sha256sum }}
+- name: create challenges directory
+  file:
+    path: '{{ dehydrated_challenges_directory }}'
+    state: directory
+    owner: '{{ dehydrated_user }}'
+    group: '{{ dehydrated_web_group }}'
+    mode: 0750
+    recurse: true
 
-#################################################
-# key setup
 
-#
-#- name: generate private keys
-#  shell: >
-#    openssl genrsa 4096 > {{ item.keypath }}
-#  args:
-#    creates: "{{ item.keypath }}"
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
-#
-## todo this leaves a very very tiny timeframe where the keys are potentially not secured; this is only relevant if the
-## folder containing the keys is not properly secured (i.e. only readable by root)
-#- name: ensure correct permissions on private keys
-#  file: >
-#    path={{ item.keypath }}
-#    owner={{ item.key_owner|default(letsencrypt_default_key_owner) }} group={{ item.key_group|default(letsencrypt_default_key_group) }}
-#    mode={{ item.key_permissions|default(letsencrypt_default_key_permissions) }}
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
-#
-#- name: generate csrs for single domain keys
-#  shell: >
-#    openssl req -new -sha256 -key '{{ item.keypath }}' -subj '/CN={{ item.host }}' > {{ acme_tiny_data_directory }}/csrs/{{ item.name }}.csr
-#  args:
-#    creates: "{{ acme_tiny_data_directory }}/csrs/{{ item.name }}.csr"
-#  when: item.host is string
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
-#
-#- name: generate csrs for multi domain keys
-#  shell: "openssl req -new -sha256 -key '{{ item.keypath }}' -subj '/' -reqexts SAN -config <(cat /etc/ssl/openssl.cnf <(printf '[SAN]\nsubjectAltName=DNS:{{ item.host|join(',DNS:') }}')) > {{ acme_tiny_data_directory }}/csrs/{{ item.name }}.csr"
-#  args:
-#    # we must use bash here because dash (default on Debian) throws an error "unexpected ( on line 1"
-#    executable: "/bin/bash"
-#    creates: "{{ acme_tiny_data_directory }}/csrs/{{ item.name }}.csr"
-#  when: item.host is not string
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
+##
 
-- name: generate the initial certificate
-  command: "{{ dehydrated_software_directory }}/dehydrated -c"
-  become_user: "{{ letsencrypt_user }}"
-  register: generate_initial_cert
-  failed_when: (generate_initial_cert.stdout is defined and
-    ('error' in generate_initial_cert.stdout or 'Error' in generate_initial_cert.stdout
-      or 'Error' in generate_initial_cert.stderr))
-  tags: ['letsencrypt_certs']
 
-#- name: generate chained certificate
-#  shell: cat {{ item.certpath }} {{ letsencrypt_intermediate_cert_path }} > {{ item.chainedcertpath }}
-#  args:
-#    creates: "{{ item.chainedcertpath }}"
-#  when: item.chainedcertpath is defined
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
-#
-#- name: generate full chained certificate
-#  shell: cat {{ item.keypath }} {{ item.certpath }} {{ letsencrypt_intermediate_cert_path }} > {{ item.fullchainedcertpath }}
-#  args:
-#    creates: "{{ item.fullchainedcertpath }}"
-#  when: item.fullchainedcertpath is defined
-#  with_items: "{{ letsencrypt_certs }}"
-#  tags: ['letsencrypt_keys']
+- name: Get lasted release of dehydrated
+  get_url:
+    dest: '{{ dehydrated_software_tmp_archive }}'
+    force: yes
+    url: '{{ dehydrated_release }}'
+
+- name: Remove software directory
+  file:
+    path: '{{ dehydrated_software_directory }}'
+    state: absent
+
+- name: create temp software directory
+  file:
+    path: '{{ dehydrated_software_tmp_directory }}'
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Expand archive
+  unarchive:
+    src: '{{ dehydrated_software_tmp_archive }}'
+    dest: '{{ dehydrated_software_tmp_directory }}'
+    remote_src: yes
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Move archive
+  command: mv '{{ dehydrated_software_tmp_directory }}/dehydrated-master' '{{ dehydrated_software_directory }}'
+
+- name: Remove archive
+  file:
+    path: '{{ dehydrated_software_tmp_archive }}'
+    state: absent
+
+- name: Remove temp files
+  file:
+    path: '{{ dehydrated_software_tmp_directory }}'
+    state: absent
+
+- name: Accept terms
+  command: sudo -u dehydrated /usr/local/bin/dehydrated/dehydrated --register --accept-terms
+  register: out
+
+- debug: var=out.stdout_lines
+
+- debug: msg="Please setup nginx and request the first certificate."
 
 #################################################
 # cron setup
 
 - name: install cronjob for key generation
   cron:
-    job: "{{ dehydrated_software_directory }}/dehydrated -c"
-    day: "{{ letsencrypt_cronjob_daysofmonth }}"
-    hour: 4
-    minute: 30
+    job: "{{ dehydrated_software_directory }}/dehydrated -c -f {{ dehydrated_config_file }} > /var/log/dehydrated.log 2>&1"
+    day: "{{ dehydrated_cronjob_daysofmonth }}"
+    hour: "{{ 6 | random }}"
+    minute: "{{ 59 | random }}"
     state: present
     name: "letsencrypt certificate renewal"
-    user: "{{ letsencrypt_user }}"
+    user: "root"
 
 ...

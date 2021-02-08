@@ -2,6 +2,6 @@
 
 # Dehydrated domains file
 
-{% for cert in letsencrypt_certs %}
+{% for cert in dehydrated_certs %}
 {{ cert.host | join(" ") }}
 {% endfor %}
